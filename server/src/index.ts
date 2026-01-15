@@ -5,8 +5,8 @@ import type {
   ClientToServerEvents,
   InterServerEvents,
   SocketData,
-} from "./socket/types";
-import { initializeSocketHandlers } from "./socket";
+} from "./socket/types.js";
+import { initializeSocketHandlers } from "./socket/index.js";
 
 const port = parseInt(process.env.PORT || "3001", 10);
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || [];

@@ -5,8 +5,8 @@ import type {
   ClientToServerEvents,
   InterServerEvents,
   SocketData,
-} from "./types";
-import { registerGameHandlers } from "./handlers/game";
+} from "./types.js";
+import { registerGameHandlers } from "./handlers/game.js";
 
 type GameServer = Server<
   ClientToServerEvents,

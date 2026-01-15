@@ -4,9 +4,9 @@ import type {
   ClientToServerEvents,
   InterServerEvents,
   SocketData,
-} from "../types";
-import { getRandomMovie, getMovieById } from "../../game/movies";
-import { checkAnswer } from "../../game/validation";
+} from "../types.js";
+import { getRandomMovie, getMovieById } from "../../game/movies.js";
+import { checkAnswer } from "../../game/validation.js";
 
 type GameSocket = Socket<
   ClientToServerEvents,
@@ -33,7 +33,7 @@ export function registerGameHandlers(_io: GameServer, socket: GameSocket) {
     });
   });
 
-  socket.on("checkAnswer", ({ movieId, guess }) => {
+  socket.on("checkAnswer", ({ movieId, guess }: { movieId: number; guess: string }) => {
     const movie = getMovieById(movieId);
 
     if (!movie) {
