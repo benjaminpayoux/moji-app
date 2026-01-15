@@ -7,6 +7,7 @@ import { useSocket } from "@/hooks/useSocket";
 
 const TIMER_DURATION = 15;
 const REVEAL_DELAY = 2500;
+const IS_DEV = process.env.NODE_ENV === "development";
 
 export function Game() {
   const {
@@ -25,6 +26,7 @@ export function Game() {
   const [showTimeout, setShowTimeout] = useState(false);
   const [revealedAnswer, setRevealedAnswer] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState(TIMER_DURATION);
+  const [isPaused, setIsPaused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isInitializedRef = useRef(false);
@@ -33,11 +35,15 @@ export function Game() {
 
   currentMovieIdRef.current = currentMovie?.id ?? null;
 
+  const isPausedRef = useRef(false);
+  isPausedRef.current = isPaused;
+
   const startTimer = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
     setTimeLeft(TIMER_DURATION);
 
     timerRef.current = setInterval(() => {
+      if (isPausedRef.current) return;
       setTimeLeft((prev) => {
         if (prev <= 1) {
           if (timerRef.current) {
@@ -131,93 +137,103 @@ export function Game() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-10 bg-gradient-to-b from-slate-50 to-white p-4">
-      <header className="text-center">
-        <h1 className="font-mono text-4xl font-black tracking-tight text-slate-900 sm:text-5xl">
-          MOJI
-        </h1>
-        <p className="mt-1 text-sm text-slate-500">Devine le film</p>
-      </header>
+    <div className="flex h-screen items-center justify-center bg-[#fffbf5] overflow-hidden">
+      <div className="game-container relative w-full max-w-[420px] px-6 py-8 bg-[#fffbf5] text-center">
+        <div
+          className="absolute -top-[15px] -left-[15px] w-[50px] h-[50px] bg-[#fcd34d] rounded-full opacity-50"
+        />
+        <div
+          className="absolute -bottom-[10px] -right-[10px] w-[70px] h-[70px] bg-[#a78bfa] rounded-[1rem] rotate-[15deg] opacity-30"
+        />
+        <div
+          className="absolute top-[30px] right-[40px] w-[35px] h-[35px] bg-[#f9a8d4] opacity-40"
+          style={{ clipPath: "polygon(50% 0%, 100% 100%, 0% 100%)" }}
+        />
+        <div
+          className="absolute bottom-[60px] -left-[20px] w-[40px] h-[40px] bg-[#7dd3fc] rounded-[8px] -rotate-[10deg] opacity-40"
+        />
 
-      <div className="flex flex-col items-center gap-4">
-        <div className="flex items-center gap-3">
-          <p className="text-lg font-medium text-slate-600">
-            Quel est ce film ?
-          </p>
+        <h1 className="font-[family-name:var(--font-fredoka)] font-bold text-[3rem] text-[#7c3aed] mb-[0.3rem] relative z-[1]">
+          Play<span className="text-[#ec4899]">Moji</span>
+        </h1>
+        <p className="font-[family-name:var(--font-quicksand)] font-semibold text-[1rem] text-[#a78bfa] mb-8 relative z-[1]">
+          Devine. En emojis.
+        </p>
+
+        <div className="relative z-[1] mb-6">
           {isConnected && currentMovie && !showSuccess && !showTimeout && (
             <div
-              className={`flex h-10 w-10 items-center justify-center rounded-full font-mono text-lg font-bold transition-colors ${
+              className={`absolute -top-3 -right-3 flex items-center justify-center w-10 h-10 rounded-full font-[family-name:var(--font-quicksand)] font-bold text-base z-10 transition-colors ${
                 timeLeft <= 5
-                  ? "bg-red-100 text-red-600"
-                  : "bg-slate-100 text-slate-700"
+                  ? "bg-[#fef2f2] text-[#f87171] border-2 border-[#f87171]"
+                  : "bg-[#ddd6fe] text-[#7c3aed] border-2 border-[#7c3aed]"
               }`}
             >
               {timeLeft}
             </div>
           )}
-        </div>
-        <div className="relative flex min-h-[140px] items-center justify-center">
-          {!isConnected || !currentMovie ? (
-            <div className="h-24 flex items-center">
-              <span className="text-slate-400">Connexion...</span>
-            </div>
-          ) : showSuccess ? (
-            <div className="flex flex-col items-center gap-2 animate-in fade-in zoom-in duration-300">
-              <span className="text-5xl font-black text-emerald-500">
+          <div
+            className="h-[120px] px-4 bg-white rounded-[1.25rem] border-4 border-[#e9d5ff] w-full flex items-center justify-center"
+            style={{ boxShadow: "5px 5px 0px #fce7f3, 10px 10px 0px #ddd6fe" }}
+          >
+            {!isConnected || !currentMovie ? (
+              <span className="text-[#a78bfa] text-xl font-[family-name:var(--font-quicksand)] font-semibold">
+                Connexion...
+              </span>
+            ) : showSuccess ? (
+              <span className="font-[family-name:var(--font-fredoka)] font-semibold text-[1.5rem] text-[#10b981] animate-bounce-success">
                 Bravo !
               </span>
-            </div>
-          ) : showTimeout ? (
-            <div className="flex flex-col items-center gap-3 animate-in fade-in zoom-in duration-300">
-              <span className="text-3xl font-bold text-red-500">
-                Temps écoulé !
-              </span>
-              <span className="text-2xl font-medium text-slate-700">
-                {revealedAnswer}
-              </span>
-            </div>
-          ) : (
-            <p className="text-center text-7xl leading-relaxed sm:text-8xl md:text-9xl">
-              {currentMovie.emojis}
-            </p>
-          )}
+            ) : showTimeout ? (
+              <div className="flex flex-col items-center gap-2">
+                <span className="font-[family-name:var(--font-fredoka)] font-semibold text-[1.25rem] text-[#f87171]">
+                  Temps écoulé !
+                </span>
+                <span className="font-[family-name:var(--font-quicksand)] font-semibold text-xl text-[#7c3aed]">
+                  {revealedAnswer}
+                </span>
+              </div>
+            ) : (
+              <span className="text-[3.5rem]">{currentMovie.emojis}</span>
+            )}
+          </div>
         </div>
+
+        <div className="relative z-[1] mb-4">
+          <Input
+            ref={inputRef}
+            type="text"
+            placeholder="Quel est ce film ?"
+            value={guess}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            disabled={showSuccess || showTimeout || !isConnected || !currentMovie}
+            className={isError ? "error" : ""}
+            autoComplete="off"
+            autoFocus
+          />
+        </div>
+
+        <div className="relative z-[1]">
+          <Button
+            onClick={handleSubmit}
+            disabled={showSuccess || showTimeout || !isConnected || !currentMovie}
+          >
+            Valider
+          </Button>
+        </div>
+
       </div>
 
-      <div className="flex w-full max-w-md flex-col gap-3 sm:flex-row">
-        <Input
-          ref={inputRef}
-          type="text"
-          placeholder="Ta réponse..."
-          value={guess}
-          onChange={handleInputChange}
-          onKeyDown={handleKeyDown}
-          disabled={showSuccess || showTimeout || !isConnected || !currentMovie}
-          className={`h-14 text-center text-lg font-medium transition-all ${
-            isError
-              ? "border-red-500 ring-2 ring-red-500/20 focus-visible:border-red-500 focus-visible:ring-red-500/20"
-              : ""
-          }`}
-          autoComplete="off"
-          autoFocus
-        />
-        <Button
-          onClick={handleSubmit}
-          disabled={showSuccess || showTimeout || !isConnected || !currentMovie}
-          size="lg"
-          className="h-14 bg-slate-900 px-8 font-mono font-bold uppercase tracking-wide hover:bg-slate-800"
+      {IS_DEV && (
+        <button
+          type="button"
+          onClick={() => setIsPaused((p) => !p)}
+          className="fixed bottom-4 right-4 px-3 py-2 text-sm bg-gray-800 text-white rounded-lg shadow-lg hover:bg-gray-700 z-[9999]"
         >
-          Valider
-        </Button>
-      </div>
-
-      <p
-        className={`h-6 font-medium text-red-500 transition-opacity ${
-          isError && !showTimeout ? "opacity-100" : "opacity-0"
-        }`}
-      >
-        Essaie encore !
-      </p>
+          {isPaused ? "▶ Resume" : "⏸ Pause"}
+        </button>
+      )}
     </div>
   );
 }
