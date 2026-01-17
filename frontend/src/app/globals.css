@@ -44,3 +44,22 @@
 .animate-bounce-success {
   animation: bounce-success 0.5s ease;
 }
+
+@keyframes success-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+@keyframes error-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-4px); }
+  40%, 80% { transform: translateX(4px); }
+}
+
+.animate-success-pulse {
+  animation: success-pulse 0.4s ease;
+}
+
+.animate-error-shake {
+  animation: error-shake 0.4s ease;
+}

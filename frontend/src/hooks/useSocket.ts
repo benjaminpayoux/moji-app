@@ -27,6 +27,8 @@ export function useSocket(): UseSocketReturn {
 
     const socket = getSocket();
 
+    socket.removeAllListeners();
+
     socket.on("connect", () => setIsConnected(true));
     socket.on("disconnect", () => setIsConnected(false));
     socket.on("movieData", (movie) => setCurrentMovie(movie));
@@ -34,7 +36,11 @@ export function useSocket(): UseSocketReturn {
       answerCallbackRef.current?.(result);
     });
 
-    socket.connect();
+    if (socket.connected) {
+      setIsConnected(true);
+    } else {
+      socket.connect();
+    }
   }, []);
 
   const disconnect = useCallback(() => {

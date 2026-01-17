@@ -1,13 +1,55 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import type { ReactNode } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useSocket } from "@/hooks/useSocket";
 
-const TIMER_DURATION = 15;
+const TIMER_DURATION = 20;
 const REVEAL_DELAY = 2500;
 const IS_DEV = process.env.NODE_ENV === "development";
+
+type MovieData = { id: number; emojis: string };
+
+function renderGameContent(
+  isConnected: boolean,
+  currentMovie: MovieData | null,
+  showSuccess: boolean,
+  showTimeout: boolean,
+  revealedAnswer: string | null
+): ReactNode {
+  if (!isConnected || !currentMovie) {
+    return (
+      <span className="text-[#a78bfa] text-xl font-[family-name:var(--font-quicksand)] font-semibold">
+        Connexion...
+      </span>
+    );
+  }
+
+  if (showSuccess) {
+    return (
+      <span className="font-[family-name:var(--font-fredoka)] font-semibold text-[1.5rem] text-[#10b981] animate-bounce-success">
+        Bravo !
+      </span>
+    );
+  }
+
+  if (showTimeout) {
+    return (
+      <div className="flex flex-col items-center gap-2">
+        <span className="font-[family-name:var(--font-fredoka)] font-semibold text-[1.25rem] text-[#f87171]">
+          Temps écoulé !
+        </span>
+        <span className="font-[family-name:var(--font-quicksand)] font-semibold text-xl text-[#7c3aed]">
+          {revealedAnswer}
+        </span>
+      </div>
+    );
+  }
+
+  return <span className="text-[3.5rem]">{currentMovie.emojis}</span>;
+}
 
 export function Game() {
   const {
@@ -29,7 +71,6 @@ export function Game() {
   const [isPaused, setIsPaused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isInitializedRef = useRef(false);
   const hasRequestedFirstMovieRef = useRef(false);
   const currentMovieIdRef = useRef<number | null>(null);
 
@@ -60,9 +101,7 @@ export function Game() {
     }, 1000);
   }, [reportTimeout]);
 
-  if (!isInitializedRef.current) {
-    isInitializedRef.current = true;
-
+  useEffect(() => {
     onAnswerResult((result) => {
       if (result.correct) {
         if (timerRef.current) {
@@ -97,7 +136,7 @@ export function Game() {
     });
 
     connect();
-  }
+  }, []);
 
   if (isConnected && !currentMovie && !hasRequestedFirstMovieRef.current) {
     hasRequestedFirstMovieRef.current = true;
@@ -176,26 +215,7 @@ export function Game() {
             className="h-[120px] px-4 bg-white rounded-[1.25rem] border-4 border-[#e9d5ff] w-full flex items-center justify-center"
             style={{ boxShadow: "5px 5px 0px #fce7f3, 10px 10px 0px #ddd6fe" }}
           >
-            {!isConnected || !currentMovie ? (
-              <span className="text-[#a78bfa] text-xl font-[family-name:var(--font-quicksand)] font-semibold">
-                Connexion...
-              </span>
-            ) : showSuccess ? (
-              <span className="font-[family-name:var(--font-fredoka)] font-semibold text-[1.5rem] text-[#10b981] animate-bounce-success">
-                Bravo !
-              </span>
-            ) : showTimeout ? (
-              <div className="flex flex-col items-center gap-2">
-                <span className="font-[family-name:var(--font-fredoka)] font-semibold text-[1.25rem] text-[#f87171]">
-                  Temps écoulé !
-                </span>
-                <span className="font-[family-name:var(--font-quicksand)] font-semibold text-xl text-[#7c3aed]">
-                  {revealedAnswer}
-                </span>
-              </div>
-            ) : (
-              <span className="text-[3.5rem]">{currentMovie.emojis}</span>
-            )}
+            {renderGameContent(isConnected, currentMovie, showSuccess, showTimeout, revealedAnswer)}
           </div>
         </div>
 

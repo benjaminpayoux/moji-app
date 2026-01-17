@@ -129,3 +129,11 @@ export function getRandomMovie(excludeId?: number): ServerMovie {
 export function getMovieById(id: number): ServerMovie | undefined {
   return serverMovies.find((m) => m.id === id);
 }
+
+export function getRandomMovieExcluding(excludeIds: Set<number>): ServerMovie {
+  const available = serverMovies.filter((m) => !excludeIds.has(m.id));
+  if (available.length === 0) {
+    return serverMovies[Math.floor(Math.random() * serverMovies.length)];
+  }
+  return available[Math.floor(Math.random() * available.length)];
+}

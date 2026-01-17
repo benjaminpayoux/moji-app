@@ -20,6 +20,7 @@ export function getSocket(): Socket<ServerToClientEvents, ClientToServerEvents> 
 
 export function disconnectSocket() {
   if (socket) {
+    socket.removeAllListeners();
     socket.disconnect();
     socket = null;
   }
