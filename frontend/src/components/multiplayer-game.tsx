@@ -1,15 +1,16 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useMultiplayerSocket } from "@/hooks/useMultiplayerSocket";
-import type { RoundResult, GameEndResult } from "@/types/socket";
+import { getActiveRoom, clearActiveRoom } from "@/lib/session";
+import type { RoundResult, GameEndResult, ReconnectFailedData, RoundStartData, TimeSyncData } from "@/types/socket";
 
-const TIMER_DURATION = 15;
+const TIMER_DISPLAY_INTERVAL_MS = 100;
 
-type GamePhase = "waiting" | "playing" | "round_result" | "game_end";
+type GamePhase = "waiting" | "playing" | "round_result" | "game_end" | "reconnecting";
 
 function getResultTextColor(isTie: boolean | null, didWin: boolean): string {
   if (isTie) return "text-[#7c3aed]";
@@ -37,20 +38,27 @@ function getRoundResultText(winnerId: string | null, didWinRound: boolean): stri
 export function MultiplayerGame() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const roomId = searchParams.get("roomId");
+  const roomIdFromUrl = searchParams.get("roomId");
 
   const {
     isConnected,
     roomState,
-    mySocketId,
+    roundEndTime,
+    myPlayerId,
+    opponentStatus,
     connect,
     disconnect,
     submitAnswer,
-    reportTimeout,
+    attemptReconnect,
+    signalLeave,
+    onRoundStart,
+    onTimeSync,
     onRoundResult,
     onGameEnd,
     onOpponentLeft,
     onWrongAnswer,
+    onReconnectSuccess,
+    onReconnectFailed,
   } = useMultiplayerSocket();
 
   const [guess, setGuess] = useState("");
@@ -58,72 +66,93 @@ export function MultiplayerGame() {
   const [phase, setPhase] = useState<GamePhase>("waiting");
   const [roundResult, setRoundResult] = useState<RoundResult | null>(null);
   const [gameResult, setGameResult] = useState<GameEndResult | null>(null);
-  const [timeLeft, setTimeLeft] = useState(TIMER_DURATION);
-  const [opponentLeft, setOpponentLeft] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(20);
+  const [currentRoomId, setCurrentRoomId] = useState<string | null>(roomIdFromUrl);
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const initRef = useRef(false);
+  const displayTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const roundTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptedRef = useRef(false);
+  const roundEndTimeRef = useRef<number | null>(null);
 
-  const clearTimer = useCallback(() => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
+  const clearDisplayTimer = useCallback(() => {
+    if (displayTimerRef.current) {
+      clearInterval(displayTimerRef.current);
+      displayTimerRef.current = null;
     }
   }, []);
 
-  const startTimer = useCallback(() => {
-    clearTimer();
-    setTimeLeft(TIMER_DURATION);
+  const startDisplayTimer = useCallback(() => {
+    clearDisplayTimer();
 
-    timerRef.current = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearTimer();
-          if (roomId && roomState?.currentMovie) {
-            reportTimeout(roomId, roomState.currentMovie.id);
-          }
-          return 0;
+    displayTimerRef.current = setInterval(() => {
+      if (roundEndTimeRef.current) {
+        const remaining = Math.max(0, Math.ceil((roundEndTimeRef.current - Date.now()) / 1000));
+        setTimeLeft(remaining);
+      }
+    }, TIMER_DISPLAY_INTERVAL_MS);
+  }, [clearDisplayTimer]);
+
+  onRoundStart(
+    useCallback(
+      (data: RoundStartData) => {
+        roundEndTimeRef.current = data.endTime;
+        setTimeLeft(Math.ceil(data.durationMs / 1000));
+        setPhase("playing");
+        if (data.round === 1 || !displayTimerRef.current) {
+          startDisplayTimer();
         }
-        return prev - 1;
-      });
-    }, 1000);
-  }, [clearTimer, reportTimeout, roomId, roomState?.currentMovie]);
+      },
+      [startDisplayTimer]
+    )
+  );
+
+  onTimeSync(
+    useCallback(
+      (data: TimeSyncData) => {
+        if (roundEndTimeRef.current) {
+          roundEndTimeRef.current = Date.now() + data.remainingMs;
+        }
+      },
+      []
+    )
+  );
 
   onRoundResult(
     useCallback(
       (result: RoundResult) => {
-        clearTimer();
+        clearDisplayTimer();
+        roundEndTimeRef.current = null;
         setRoundResult(result);
         setPhase("round_result");
         setGuess("");
         setIsError(false);
-
-        setTimeout(() => {
-          setPhase("playing");
-          setRoundResult(null);
-        }, 2500);
       },
-      [clearTimer]
+      [clearDisplayTimer]
     )
   );
 
   onGameEnd(
     useCallback(
       (result: GameEndResult) => {
-        clearTimer();
+        clearDisplayTimer();
+        roundEndTimeRef.current = null;
+        if (roundTransitionTimeoutRef.current) {
+          clearTimeout(roundTransitionTimeoutRef.current);
+          roundTransitionTimeoutRef.current = null;
+        }
         setGameResult(result);
         setPhase("game_end");
       },
-      [clearTimer]
+      [clearDisplayTimer]
     )
   );
 
   onOpponentLeft(
     useCallback(() => {
-      clearTimer();
-      setOpponentLeft(true);
-    }, [clearTimer])
+      clearDisplayTimer();
+      roundEndTimeRef.current = null;
+    }, [clearDisplayTimer])
   );
 
   onWrongAnswer(
@@ -133,24 +162,63 @@ export function MultiplayerGame() {
     }, [])
   );
 
-  if (!initRef.current) {
-    initRef.current = true;
+  onReconnectSuccess(
+    useCallback(() => {
+      setPhase("playing");
+      startDisplayTimer();
+    }, [startDisplayTimer])
+  );
+
+  onReconnectFailed(
+    useCallback((_data: ReconnectFailedData) => {
+      clearActiveRoom();
+      router.push("/mode?error=room_closed");
+    }, [router])
+  );
+
+  useEffect(() => {
     connect();
-  }
+  }, [connect]);
 
-  if (phase === "waiting" && roomState?.currentMovie && !timerRef.current) {
-    setPhase("playing");
-    startTimer();
-  }
+  useEffect(() => {
+    if (isConnected && !reconnectAttemptedRef.current) {
+      reconnectAttemptedRef.current = true;
+      const savedRoomId = getActiveRoom();
+      const roomIdToUse = roomIdFromUrl || savedRoomId;
 
-  if (phase === "playing" && roomState?.currentMovie && !timerRef.current) {
-    startTimer();
-  }
+      if (roomIdToUse) {
+        setPhase("reconnecting");
+        setCurrentRoomId(roomIdToUse);
+        attemptReconnect(roomIdToUse);
+      }
+    }
+  }, [isConnected, roomIdFromUrl, attemptReconnect]);
+
+  useEffect(() => {
+    if (roomState?.roomId && roomState.roomId !== currentRoomId) {
+      setCurrentRoomId(roomState.roomId);
+    }
+  }, [roomState?.roomId, currentRoomId]);
+
+  useEffect(() => {
+    if (roundEndTime) {
+      roundEndTimeRef.current = roundEndTime;
+      if (!displayTimerRef.current) {
+        startDisplayTimer();
+      }
+    }
+  }, [roundEndTime, startDisplayTimer]);
+
+  useEffect(() => {
+    return () => {
+      clearDisplayTimer();
+    };
+  }, [clearDisplayTimer]);
 
   const handleSubmit = useCallback(() => {
-    if (!roomId || !roomState?.currentMovie || !guess.trim()) return;
-    submitAnswer(roomId, roomState.currentMovie.id, guess);
-  }, [roomId, roomState?.currentMovie, guess, submitAnswer]);
+    if (!currentRoomId || !roomState?.currentMovie || !guess.trim()) return;
+    submitAnswer(currentRoomId, roomState.currentMovie.id, guess);
+  }, [currentRoomId, roomState?.currentMovie, guess, submitAnswer]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") {
@@ -166,19 +234,22 @@ export function MultiplayerGame() {
   };
 
   const handleReturnToMenu = useCallback(() => {
+    if (currentRoomId) {
+      signalLeave(currentRoomId);
+    }
     disconnect();
     router.push("/mode");
-  }, [disconnect, router]);
+  }, [currentRoomId, signalLeave, disconnect, router]);
 
-  const myScore = mySocketId ? roomState?.players.find((p) => p.id === mySocketId)?.score ?? 0 : 0;
-  const opponent = roomState?.players.find((p) => p.id !== mySocketId);
+  const myScore = myPlayerId ? roomState?.players.find((p) => p.id === myPlayerId)?.score ?? 0 : 0;
+  const opponent = roomState?.players.find((p) => p.id !== myPlayerId);
   const opponentScore = opponent?.score ?? 0;
 
-  const didIWinRound = roundResult?.winnerId === mySocketId;
-  const didIWinGame = gameResult?.winnerId === mySocketId;
+  const didIWinRound = roundResult?.winnerId === myPlayerId;
+  const didIWinGame = gameResult?.winnerId === myPlayerId;
   const isTie = gameResult && gameResult.winnerId === null;
 
-  if (opponentLeft) {
+  if (opponentStatus === "left") {
     return (
       <div className="flex h-screen items-center justify-center bg-[#fffbf5] overflow-hidden">
         <div className="game-container relative w-full max-w-[420px] px-6 py-8 bg-[#fffbf5] text-center">
@@ -196,13 +267,40 @@ export function MultiplayerGame() {
             >
               <span className="text-[2rem]">😢</span>
               <span className="font-[family-name:var(--font-fredoka)] font-semibold text-[1.25rem] text-[#f87171]">
-                Adversaire déconnecté
+                Adversaire parti
               </span>
             </div>
           </div>
 
           <div className="relative z-[1]">
             <Button onClick={handleReturnToMenu}>Retour au menu</Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === "reconnecting") {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#fffbf5] overflow-hidden">
+        <div className="game-container relative w-full max-w-[420px] px-6 py-8 bg-[#fffbf5] text-center">
+          <div className="absolute -top-[15px] -left-[15px] w-[50px] h-[50px] bg-[#fcd34d] rounded-full opacity-50" />
+          <div className="absolute -bottom-[10px] -right-[10px] w-[70px] h-[70px] bg-[#a78bfa] rounded-[1rem] rotate-[15deg] opacity-30" />
+
+          <h1 className="font-[family-name:var(--font-fredoka)] font-bold text-[3rem] text-[#7c3aed] mb-[0.3rem] relative z-[1]">
+            Play<span className="text-[#ec4899]">Moji</span>
+          </h1>
+
+          <div className="relative z-[1] mb-6">
+            <div
+              className="h-[120px] px-4 bg-white rounded-[1.25rem] border-4 border-[#e9d5ff] w-full flex flex-col items-center justify-center gap-2"
+              style={{ boxShadow: "5px 5px 0px #fce7f3, 10px 10px 0px #ddd6fe" }}
+            >
+              <span className="text-[2rem]">🔄</span>
+              <span className="font-[family-name:var(--font-fredoka)] font-semibold text-[1.25rem] text-[#a78bfa]">
+                Reconnexion...
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -243,7 +341,7 @@ export function MultiplayerGame() {
                     Toi
                   </span>
                   <span className="font-[family-name:var(--font-fredoka)] font-bold text-2xl text-[#7c3aed]">
-                    {mySocketId ? gameResult.finalScores[mySocketId] ?? 0 : 0}
+                    {myPlayerId ? gameResult.finalScores[myPlayerId] ?? 0 : 0}
                   </span>
                 </div>
                 <div className="flex flex-col items-center">
@@ -280,6 +378,16 @@ export function MultiplayerGame() {
         <h1 className="font-[family-name:var(--font-fredoka)] font-bold text-[2.5rem] text-[#7c3aed] mb-[0.3rem] relative z-[1]">
           Play<span className="text-[#ec4899]">Moji</span>
         </h1>
+
+        {opponentStatus === "disconnected" && (
+          <div className="relative z-[1] mb-2">
+            <div className="bg-[#fef3c7] border-2 border-[#fcd34d] rounded-lg px-3 py-2">
+              <span className="font-[family-name:var(--font-quicksand)] font-semibold text-sm text-[#b45309]">
+                Adversaire déconnecté
+              </span>
+            </div>
+          </div>
+        )}
 
         <div className="relative z-[1] mb-4 flex justify-center gap-6">
           <div className="flex flex-col items-center">

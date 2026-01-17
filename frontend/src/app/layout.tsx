@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Fredoka, Quicksand } from "next/font/google";
+import { ActiveGameRedirect } from "@/components/active-game-redirect";
 import "./globals.css";
 
 const fredoka = Fredoka({
@@ -32,7 +33,7 @@ export default function RootLayout({
       <body
         className={`${fredoka.variable} ${quicksand.variable} antialiased`}
       >
-        {children}
+        <ActiveGameRedirect>{children}</ActiveGameRedirect>
       </body>
     </html>
   );

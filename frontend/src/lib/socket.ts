@@ -1,5 +1,6 @@
 import { io, Socket } from "socket.io-client";
 import type { ServerToClientEvents, ClientToServerEvents } from "@/types/socket";
+import { getOrCreatePlayerId } from "./session";
 
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3000";
 
@@ -14,6 +15,11 @@ export function getSocket(): Socket<ServerToClientEvents, ClientToServerEvents> 
       reconnectionDelay: 1000,
       timeout: 10000,
     });
+
+    socket.on("connect", () => {
+      const playerId = getOrCreatePlayerId();
+      socket?.emit("registerPlayer", { playerId });
+    });
   }
   return socket;
 }
@@ -23,5 +29,11 @@ export function disconnectSocket() {
     socket.removeAllListeners();
     socket.disconnect();
     socket = null;
+  }
+}
+
+export function signalIntentionalLeave(roomId: string) {
+  if (socket?.connected) {
+    socket.emit("intentionalLeave", { roomId });
   }
 }

@@ -24,6 +24,33 @@ type GameServer = Server<
   SocketData
 >;
 
+function handleRoundTimeout(io: GameServer, roomId: string) {
+  const room = roomManager.getRoom(roomId);
+  if (!room || room.state.roundAnswered) return;
+
+  roomManager.markRoundAnswered(roomId);
+  roomManager.clearAllTimers(roomId);
+
+  const movie = getMovieById(room.state.currentMovieId);
+
+  io.to(roomId).emit("roundTimeout", {
+    correctAnswer: movie?.answers[0] || "",
+    scores: roomManager.getScores(roomId),
+  });
+
+  io.to(roomId).emit("roundResult", {
+    winnerId: null,
+    correctAnswer: movie?.answers[0] || "",
+    scores: roomManager.getScores(roomId),
+  });
+
+  if (roomManager.isGameOver(roomId)) {
+    setTimeout(() => endGame(io, roomId), 2500);
+  } else {
+    setTimeout(() => nextRound(io, roomId), 2500);
+  }
+}
+
 function nextRound(io: GameServer, roomId: string) {
   const room = roomManager.getRoom(roomId);
   if (!room) return;
@@ -36,10 +63,23 @@ function nextRound(io: GameServer, roomId: string) {
     return;
   }
 
-  const players: PlayerInfo[] = Array.from(room.players).map((id) => ({
-    id,
-    score: room.state.scores.get(id) || 0,
-  }));
+  const timerData = roomManager.startRoundTimer(roomId, () => {
+    handleRoundTimeout(io, roomId);
+  });
+
+  if (!timerData) return;
+
+  roomManager.startTimeSync(roomId, (remainingMs) => {
+    io.to(roomId).emit("timeSync", { remainingMs });
+  });
+
+  const players: PlayerInfo[] = [];
+  for (const [id] of room.players) {
+    players.push({
+      id,
+      score: room.state.scores.get(id) || 0,
+    });
+  }
 
   io.to(roomId).emit("roomState", {
     roomId: room.id,
@@ -47,6 +87,14 @@ function nextRound(io: GameServer, roomId: string) {
     currentMovie: { id: movie.id, emojis: movie.emojis },
     round: room.state.round,
     totalRounds: room.state.totalRounds,
+  });
+
+  io.to(roomId).emit("roundStart", {
+    movie: { id: movie.id, emojis: movie.emojis },
+    round: room.state.round,
+    totalRounds: room.state.totalRounds,
+    endTime: timerData.endTime,
+    durationMs: timerData.durationMs,
   });
 }
 
@@ -70,9 +118,11 @@ function endGame(io: GameServer, roomId: string) {
   setTimeout(() => {
     const room = roomManager.getRoom(roomId);
     if (room) {
-      for (const playerId of room.players) {
-        const socket = io.sockets.sockets.get(playerId);
-        socket?.leave(roomId);
+      for (const [playerId, conn] of room.players) {
+        if (conn.socketId) {
+          const socket = io.sockets.sockets.get(conn.socketId);
+          socket?.leave(roomId);
+        }
       }
       roomManager.deleteRoom(roomId);
     }
@@ -81,6 +131,9 @@ function endGame(io: GameServer, roomId: string) {
 
 export function registerMultiplayerHandlers(io: GameServer, socket: GameSocket) {
   socket.on("multiplayerAnswer", ({ roomId, movieId, guess }) => {
+    const playerId = socket.data.playerId;
+    if (!playerId) return;
+
     const room = roomManager.getRoom(roomId);
     if (!room || room.state.roundAnswered) return;
 
@@ -90,11 +143,13 @@ export function registerMultiplayerHandlers(io: GameServer, socket: GameSocket) 
     const isCorrect = checkAnswer(guess, movie.answers);
 
     if (isCorrect) {
-      const wasFirst = roomManager.recordCorrectAnswer(roomId, socket.id);
+      const wasFirst = roomManager.recordCorrectAnswer(roomId, playerId);
 
       if (wasFirst) {
+        roomManager.clearAllTimers(roomId);
+
         io.to(roomId).emit("roundResult", {
-          winnerId: socket.id,
+          winnerId: playerId,
           correctAnswer: movie.answers[0],
           scores: roomManager.getScores(roomId),
         });
@@ -107,26 +162,6 @@ export function registerMultiplayerHandlers(io: GameServer, socket: GameSocket) 
       }
     } else {
       socket.emit("answerResult", { correct: false });
-    }
-  });
-
-  socket.on("multiplayerTimeout", ({ roomId, movieId }) => {
-    const room = roomManager.getRoom(roomId);
-    if (!room || room.state.roundAnswered) return;
-
-    roomManager.markRoundAnswered(roomId);
-    const movie = getMovieById(movieId);
-
-    io.to(roomId).emit("roundResult", {
-      winnerId: null,
-      correctAnswer: movie?.answers[0] || "",
-      scores: roomManager.getScores(roomId),
-    });
-
-    if (roomManager.isGameOver(roomId)) {
-      setTimeout(() => endGame(io, roomId), 2500);
-    } else {
-      setTimeout(() => nextRound(io, roomId), 2500);
     }
   });
 }

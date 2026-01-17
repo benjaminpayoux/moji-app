@@ -32,6 +32,33 @@ export type GameEndResult = {
   finalScores: Record<string, number>;
 };
 
+export type RoundStartData = {
+  movie: MovieData;
+  round: number;
+  totalRounds: number;
+  endTime: number;
+  durationMs: number;
+};
+
+export type TimeSyncData = {
+  remainingMs: number;
+};
+
+export type RoundTimeoutData = {
+  correctAnswer: string;
+  scores: Record<string, number>;
+};
+
+export type ReconnectSuccessData = {
+  roomState: RoomState;
+  opponentConnected: boolean;
+  roundEndTime: number | null;
+};
+
+export type ReconnectFailedData = {
+  reason: "room_closed" | "player_not_found" | "invalid_room";
+};
+
 export interface ServerToClientEvents {
   movieData: (movie: MovieData) => void;
   answerResult: (result: CheckAnswerResult) => void;
@@ -39,9 +66,17 @@ export interface ServerToClientEvents {
   matchmakingStatus: (data: { waiting: boolean }) => void;
   matchFound: (data: { roomId: string; players: PlayerInfo[] }) => void;
   roomState: (state: RoomState) => void;
+  roundStart: (data: RoundStartData) => void;
+  timeSync: (data: TimeSyncData) => void;
+  roundTimeout: (data: RoundTimeoutData) => void;
   roundResult: (result: RoundResult) => void;
   gameEnd: (result: GameEndResult) => void;
   opponentLeft: () => void;
+  reconnectSuccess: (data: ReconnectSuccessData) => void;
+  reconnectFailed: (data: ReconnectFailedData) => void;
+  opponentDisconnected: (data: { reconnectTimeoutSeconds: number }) => void;
+  opponentReconnected: () => void;
+  opponentLeftPermanently: () => void;
 }
 
 export interface ClientToServerEvents {
@@ -55,7 +90,9 @@ export interface ClientToServerEvents {
     movieId: number;
     guess: string;
   }) => void;
-  multiplayerTimeout: (data: { roomId: string; movieId: number }) => void;
+  registerPlayer: (data: { playerId: string }) => void;
+  attemptReconnect: (data: { playerId: string; roomId: string }) => void;
+  intentionalLeave: (data: { roomId: string }) => void;
 }
 
 export interface InterServerEvents {
@@ -64,5 +101,6 @@ export interface InterServerEvents {
 
 export interface SocketData {
   sessionId: string;
+  playerId?: string;
   currentMovieId?: number;
 }
