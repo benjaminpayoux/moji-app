@@ -35,7 +35,7 @@ export function ModeSelection() {
 
         <div className="relative z-[1] flex flex-col gap-4">
           <Button onClick={() => router.push("/game")}>
-            Jouer seul
+            Partie Rapide
           </Button>
           <Button variant="secondary" onClick={() => router.push("/game/waiting")}>
             Multijoueur
